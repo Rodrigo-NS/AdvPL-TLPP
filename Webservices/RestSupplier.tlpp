@@ -1,0 +1,117 @@
+#include "tlpp-core.th"
+#include "tlpp-rest.th"
+#include "totvs.ch"
+
+/*/{Protheus.doc} RestSupplier
+API REST para buscar informações de fornecedores na tabela SA2.
+@type Class
+@since 2025-01-29
+@author Rodrigo Soledade
+@version 1.0
+/*/
+Class RestSupplier
+    Public Method New() CONSTRUCTOR
+
+    @Get("rdtest/fornecedores")
+    Public Method getSupplierInfo()
+EndClass
+
+Method New() Class RestSupplier
+Return Self
+
+/*/{Protheus.doc} getSupplierInfo
+Busca fornecedores na tabela SA2 baseado em um dos três parâmetros: CNPJ, Código ou Nome.
+@type Method
+@return JSON com os dados do fornecedor e a quantidade total de registros encontrados.
+/*/
+Method getSupplierInfo() Class RestSupplier
+    Local jParams := JsonObject():New()
+    Local jResponse := JsonObject():New()
+    Local cQuery := ""
+    Local cAliasQry := getNextAlias()
+    Local cWhere := ""
+    Local aFornecedores := {}
+    Local nTotalFornec := 0 // Variável para armazenar a contagem de fornecedores
+
+    jParams := oRest:getQueryRequest()
+
+    // Define o cabeçalho da resposta como JSON
+    oRest:setKeyHeaderResponse("Content-Type", "application/json")
+
+    // Variáveis para armazenar os filtros enviados
+    Local cCnpj := ""
+    Local cCodigo := ""
+    Local cNome := ""
+
+    // Verificar e atribuir valores recebidos via GET
+    If jParams:HasProperty('cnpj')
+        cCnpj := AllTrim(jParams['cnpj'])
+    EndIf
+
+    If jParams:HasProperty('codigo')
+        cCodigo := AllTrim(jParams['codigo'])
+    EndIf
+
+    If jParams:HasProperty('nome')
+        cNome := AllTrim(jParams['nome'])
+    EndIf
+
+    // Valida se pelo menos um dos parâmetros foi informado
+    If Empty(cCnpj) .And. Empty(cCodigo) .And. Empty(cNome)
+        jResponse["error"] := "É necessário informar pelo menos um dos parâmetros: cnpj, codigo ou nome."
+        oRest:setStatusCode(400)
+        oRest:setResponse(jResponse:toJson())
+        Return .F.
+    EndIf
+
+    // Monta a cláusula WHERE baseada no parâmetro recebido
+    If !Empty(cCnpj)
+        cWhere := "AND A2_CGC LIKE " + ValToSql("%" + Upper(cCnpj) + "%")
+    ElseIf !Empty(cCodigo)
+        cWhere := "AND A2_COD LIKE " + ValToSql("%" + Upper(cCodigo) + "%")
+    ElseIf !Empty(cNome)
+        cWhere := "AND A2_NOME LIKE " + ValToSql("%" + Upper(cNome) + "%")
+    EndIf
+
+    // Construção da Query
+    cQuery := "SELECT A2_COD, A2_NOME, A2_CGC, A2_END, A2_MUN, A2_EST, A2_EMAIL, A2_TEL "
+    cQuery += "FROM " + RetSqlTab("SA2")+ " (NOLOCK) WHERE " + RetSqlCond("SA2") + " " + cWhere
+    Conout("Filter getSupplierInfo: " + cQuery)
+
+    // Executa a consulta SQL
+    MpSysOpenQuery(cQuery, cAliasQry)
+
+    // Percorre os registros e adiciona à resposta JSON
+    While (cAliasQry)->(!Eof())
+        aAdd(aFornecedores, {;
+        "codigo" : (cAliasQry)->A2_COD, ;
+        "nome" : AllTrim((cAliasQry)->A2_NOME), ;
+        "cnpj" : (cAliasQry)->A2_CGC, ;
+        "endereco" : AllTrim((cAliasQry)->A2_END), ;
+        "cidade" : AllTrim((cAliasQry)->A2_MUN), ;
+        "estado" : (cAliasQry)->A2_EST, ;
+        "email" : AllTrim((cAliasQry)->A2_EMAIL), ;
+        "telefone" : AllTrim((cAliasQry)->A2_TEL) ;
+        })
+        nTotalFornec++ // Incrementa a contagem de fornecedores encontrados
+        (cAliasQry)->(dbSkip())
+    EndDo
+
+    // Fecha a query
+    (cAliasQry)->(dbCloseArea())
+
+    // Verifica se encontrou fornecedores
+    If nTotalFornec == 0
+        jResponse["message"] := "Nenhum fornecedor encontrado para os paramêtros informados."
+        jResponse["total"] := 0
+        oRest:setStatusCode(404)
+    Else
+        jResponse["fornecedores"] := aFornecedores
+        jResponse["total"] := nTotalFornec // Adiciona a contagem no JSON
+        oRest:setStatusCode(200)
+    EndIf
+
+    // Retorna a resposta JSON
+    oRest:setResponse(jResponse:toJson())
+
+Return .T.

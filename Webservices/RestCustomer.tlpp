@@ -2,21 +2,21 @@
 #include "tlpp-rest.th"
 #include "totvs.ch"
 
-/*/{Protheus.doc} RestClientController
+/*/{Protheus.doc} RestCustomer
 API REST para buscar informações de clientes na tabela SA1.
 @type Class
 @since 2025-01-29
 @author Rodrigo Soledade
 @version 1.1
 /*/
-Class RestClientController
+Class RestCustomer
     Public Method New() CONSTRUCTOR
 
     @Get("rdtest/clientes")
     Public Method getClientInfo()
 EndClass
 
-Method New() Class RestClientController
+Method New() Class RestCustomer
 Return Self
 
 /*/{Protheus.doc} getClientInfo
@@ -24,7 +24,7 @@ Busca clientes na tabela SA1 baseado em um dos três parâmetros: CNPJ, Código ou 
 @type Method
 @return JSON com os dados do cliente e a quantidade total de registros encontrados.
 /*/
-Method getClientInfo() Class RestClientController
+Method getClientInfo() Class RestCustomer
     Local jParams as json
     Local jResponse as json
     Local cQuery as character
@@ -84,15 +84,15 @@ Method getClientInfo() Class RestClientController
 
     // Percorre os registros e adiciona à resposta JSON
     While (cAliasQry)->(!Eof())
-        aAdd(aClientes, {;
+        aAdd(aClientes, { ;
         "codigo" : (cAliasQry)->A1_COD, ;
         "nome" : AllTrim((cAliasQry)->A1_NOME), ;
         "cnpj" : (cAliasQry)->A1_CGC, ;
         "endereco" : AllTrim((cAliasQry)->A1_END), ;
         "cidade" : AllTrim((cAliasQry)->A1_MUN), ;
         "estado" : (cAliasQry)->A1_EST, ;
-        "email" : (cAliasQry)->A1_EMAIL,;
-        "telefone" : (cAliasQry)->A1_TEL ;
+        "email" : AllTrim((cAliasQry)->A1_EMAIL), ;
+        "telefone" : AllTrim((cAliasQry)->A1_TEL) ;
         })
         nTotalCli++ // Incrementa a contagem de clientes encontrados
         (cAliasQry)->(dbSkip())
