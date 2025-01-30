@@ -1,0 +1,119 @@
+#include "tlpp-core.th"
+#include "tlpp-rest.th"
+#include "totvs.ch"
+
+/*/{Protheus.doc} RestClientController
+API REST para buscar informações de clientes na tabela SA1.
+@type Class
+@since 2025-01-29
+@author Rodrigo Soledade
+@version 1.1
+/*/
+Class RestClientController
+    Public Method New() CONSTRUCTOR
+
+    @Get("rdtest/clientes")
+    Public Method getClientInfo()
+EndClass
+
+Method New() Class RestClientController
+Return Self
+
+/*/{Protheus.doc} getClientInfo
+Busca clientes na tabela SA1 baseado em um dos três parâmetros: CNPJ, Código ou Nome.
+@type Method
+@return JSON com os dados do cliente e a quantidade total de registros encontrados.
+/*/
+Method getClientInfo() Class RestClientController
+    Local jParams as json
+    Local jResponse as json
+    Local cQuery as character
+    Local cAliasQry as character
+    Local cWhere as character
+    Local aClientes := {} as array
+    Local nTotalCli as numeric // Variável para armazenar a contagem de clientes
+
+    jResponse := JsonObject():New()
+    jParams := oRest:getQueryRequest()
+    // Define o cabeçalho da resposta como JSON
+    oRest:setKeyHeaderResponse("Content-Type", "application/json")
+
+    // Variáveis para armazenar os filtros enviados
+    Local cCnpj := ""
+    Local cCodigo := ""
+    Local cNome := ""
+
+    // Verificar e atribuir valores recebidos via GET
+    If jParams:HasProperty('cnpj')
+        cCnpj := AllTrim(jParams['cnpj'])
+    EndIf
+
+    If jParams:HasProperty('codigo')
+        cCodigo := AllTrim(jParams['codigo'])
+    EndIf
+
+    If jParams:HasProperty('nome')
+        cNome := AllTrim(jParams['nome'])
+    EndIf
+
+    // Valida se pelo menos um dos parâmetros foi informado
+    If Empty(cCnpj) .And. Empty(cCodigo) .And. Empty(cNome)
+        jResponse["error"] := "É necessário informar pelo menos um dos parâmetros: cnpj, codigo ou nome."
+        oRest:setStatusCode(400)
+        oRest:setResponse(jResponse:toJson())
+        Return .F.
+    EndIf
+
+    // Monta a cláusula WHERE baseada no parâmetro recebido
+    If !Empty(cCnpj)
+        cWhere := "AND A1_CGC LIKE " + ValToSql("%" + Upper(cCnpj) + "%")
+    ElseIf !Empty(cCodigo)
+        cWhere := "AND A1_COD == " + ValToSql("%" + Upper(cCodigo) + "%")
+    ElseIf !Empty(cNome)
+        cWhere := "AND A1_NOME LIKE " + ValToSql("%" + Upper(cNome) + "%")
+    EndIf
+
+    // Construção da Query
+    cAliasQry := getNextAlias()
+    cQuery := "SELECT A1_COD, A1_NOME, A1_CGC, A1_END, A1_MUN, A1_EST, A1_EMAIL, A1_TEL "
+    cQuery += "FROM " + RetSqlTab("SA1")+ " (NOLOCK) WHERE " + RetSqlCond("SA1") +" "+ cWhere
+    Conout("Filter getClientInfo: "+cQuery)
+
+    // Executa a consulta SQL
+    MpSysOpenQuery(cQuery, cAliasQry)
+
+    // Percorre os registros e adiciona à resposta JSON
+    While (cAliasQry)->(!Eof())
+        aAdd(aClientes, {;
+        "codigo" : (cAliasQry)->A1_COD, ;
+        "nome" : AllTrim((cAliasQry)->A1_NOME), ;
+        "cnpj" : (cAliasQry)->A1_CGC, ;
+        "endereco" : AllTrim((cAliasQry)->A1_END), ;
+        "cidade" : AllTrim((cAliasQry)->A1_MUN), ;
+        "estado" : (cAliasQry)->A1_EST, ;
+        "email" : (cAliasQry)->A1_EMAIL,;
+        "telefone" : (cAliasQry)->A1_TEL ;
+        })
+        nTotalCli++ // Incrementa a contagem de clientes encontrados
+        (cAliasQry)->(dbSkip())
+    EndDo
+
+    // Fecha a query
+    (cAliasQry)->(dbCloseArea())
+
+    // Verifica se encontrou clientes
+    If nTotalCli == 0
+        jResponse["message"] := "Nenhum cliente encontrado para os critérios informados."
+        jResponse["total"] := 0
+        oRest:setStatusCode(404)
+    Else
+        jResponse["clientes"] := aClientes
+        jResponse["total"] := nTotalCli // Adiciona a contagem no JSON
+        oRest:setStatusCode(200)
+    EndIf
+
+    // Retorna a resposta JSON
+    oRest:setResponse(jResponse:toJson())
+
+Return .T.
+
