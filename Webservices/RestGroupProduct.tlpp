@@ -1,0 +1,188 @@
+#include "tlpp-core.th"
+#include "tlpp-rest.th"
+#include "totvs.ch"
+
+/*/{Protheus.doc} RestGroupProduct
+API REST para manipulação de Grupo de Produtos na tabela SBM.
+@type Class
+@since 2025-01-30
+@author Rodrigo Soledade
+@version 2.0
+/*/
+Class RestGroupProduct
+    Public Method New() CONSTRUCTOR
+
+
+    WSMETHOD GET    ID     DESCRIPTION 'Retorna o registro pesquisado' WSSYNTAX '/zWsGrpProd/get_id?{id}'                       PATH 'get_id'        PRODUCES APPLICATION_JSON
+    WSMETHOD GET    ALL    DESCRIPTION 'Retorna todos os registros'    WSSYNTAX '/zWsGrpProd/get_all?{updated_at, limit, page}' PATH 'get_all'       PRODUCES APPLICATION_JSON
+    WSMETHOD POST   NEW    DESCRIPTION 'Inclusão de registro'          WSSYNTAX '/zWsGrpProd/new'                               PATH 'new'           PRODUCES APPLICATION_JSON
+    WSMETHOD PUT    UPDATE DESCRIPTION 'Atualização de registro'       WSSYNTAX '/zWsGrpProd/update'                            PATH 'update'        PRODUCES APPLICATION_JSON
+    WSMETHOD DELETE ERASE  DESCRIPTION 'Exclusão de registro'          WSSYNTAX '/zWsGrpProd/erase'                             PATH 'erase'         PRODUCES APPLICATION_JSON
+
+
+
+    @Get("rdtest/grupos/get_id")
+    Public Method getGroupProduct()
+    
+    @Get("rdtest/grupos/get_all")
+    Public Method getAllGroups()
+    
+    @Post("rdtest/grupos/new")
+    Public Method createGroup()
+
+    @Put("rdtest/grupos/update")
+    Public Method updateGroup(id)
+
+    @Delete("rdtest/grupos/erase")
+    Public Method deleteGroup(id)
+EndClass
+
+Method New() Class RestGroupProduct
+Return Self
+
+/*/{Protheus.doc} getGroupProduct
+Busca um Grupo de Produtos por ID.
+@type Method
+@return JSON com os dados do grupo de produtos.
+/*/
+Method getGroupProduct() Class RestGroupProduct
+    Local jParams := oRest:getQueryRequest()
+    Local jResponse := JsonObject():New()
+    Local cAliasQry := "SBM"
+    Local cId := ""
+
+    // Definir cabeçalho JSON
+    oRest:setKeyHeaderResponse("Content-Type", "application/json")
+
+    // Capturar parâmetro 'id'
+    If jParams:HasProperty("id")
+        cId := AllTrim(jParams["id"])
+    EndIf
+
+    If Empty(cId)
+        jResponse["error"] := "É necessário informar o ID do grupo de produtos."
+        oRest:setStatusCode(400)
+        oRest:setResponse(jResponse:toJson())
+        Return .F.
+    EndIf
+
+    // Buscar no banco
+    DbSelectArea(cAliasQry)
+    (cAliasQry)->(DbSetOrder(1))
+
+    If !(cAliasQry)->(MsSeek(FWxFilial(cAliasQry) + cId))
+        jResponse["error"] := "Grupo de Produtos não encontrado."
+        oRest:setStatusCode(404)
+    Else
+        jResponse["grupo"] := (cAliasQry)->BM_GRUPO
+        jResponse["desc"] := (cAliasQry)->BM_DESC
+        jResponse["status"] := (cAliasQry)->BM_STATUS
+        jResponse["proori"] := (cAliasQry)->BM_PROORI
+        jResponse["margpre"] := (cAliasQry)->BM_MARGPRE
+        jResponse["dtumov"] := dToS((cAliasQry)->BM_DTUMOV)
+        oRest:setStatusCode(200)
+    EndIf
+
+    oRest:setResponse(jResponse:toJson())
+Return .T.
+
+/*/{Protheus.doc} getAllGroups
+Retorna todos os Grupos de Produtos com paginação.
+@type Method
+@return JSON com os grupos de produtos paginados.
+/*/
+Method getAllGroups() Class RestGroupProduct
+    Local jParams := oRest:getQueryRequest()
+    Local jResponse := JsonObject():New()
+    Local cQuery := ""
+    Local cAliasQry := getNextAlias()
+    Local aGrupos := {}
+    Local nTotalGrupos := 0
+    Local nLimit := 10
+    Local nPage := 1
+
+    // Definir cabeçalho JSON
+    oRest:setKeyHeaderResponse("Content-Type", "application/json")
+
+    // Capturar parâmetros opcionais
+    If jParams:HasProperty("limit")
+        nLimit := Val(jParams["limit"])
+    EndIf
+
+    If jParams:HasProperty("page")
+        nPage := Val(jParams["page"])
+    EndIf
+
+    // Construir query
+    cQuery := "SELECT BM_GRUPO, BM_DESC, BM_STATUS, BM_PROORI, BM_MARGPRE, BM_DTUMOV "
+    cQuery += "FROM " + RetSqlName("SBM") + " (NOLOCK) "
+    cQuery += "ORDER BY BM_GRUPO OFFSET " + cValToChar((nPage - 1) * nLimit) + " ROWS FETCH NEXT " + cValToChar(nLimit) + " ROWS ONLY"
+    Conout("Filter getAllGroups: " + cQuery)
+
+    // Executar query
+    MpSysOpenQuery(cQuery, cAliasQry)
+
+    While (cAliasQry)->(!EoF())
+        aAdd(aGrupos, {;
+        "grupo"   : (cAliasQry)->BM_GRUPO, ;
+        "desc"    : (cAliasQry)->BM_DESC, ;
+        "status"  : (cAliasQry)->BM_STATUS, ;
+        "proori"  : (cAliasQry)->BM_PROORI, ;
+        "margpre" : (cAliasQry)->BM_MARGPRE ;        //"dtumov"  : dToS((cAliasQry)->BM_DTUMOV) ;
+        })
+        nTotalGrupos++
+        (cAliasQry)->(dbSkip())
+    EndDo
+    (cAliasQry)->(dbCloseArea())
+
+    // Verificar se encontrou registros
+    If nTotalGrupos == 0
+        jResponse["message"] := "Nenhum grupo de produtos encontrado."
+        jResponse["total"] := 0
+        oRest:setStatusCode(404)
+    Else
+        jResponse["grupos"] := aGrupos
+        jResponse["total"] := nTotalGrupos
+        jResponse["page"] := nPage
+        jResponse["limit"] := nLimit
+        oRest:setStatusCode(200)
+    EndIf
+
+    oRest:setResponse(jResponse:toJson())
+Return .T.
+
+/*/{Protheus.doc} createGroup
+Cria um novo Grupo de Produtos.
+@type Method
+@return JSON com o status da inclusão.
+/*/
+Method createGroup() Class RestGroupProduct
+    Local jBody := oRest:getBodyRequest()
+    Local jResponse := JsonObject():New()
+    Local aDados := {}
+
+    oRest:setKeyHeaderResponse("Content-Type", "application/json")
+
+    // Validar campos obrigatórios
+    If !jBody:HasProperty("grupo") .Or. !jBody:HasProperty("desc")
+        jResponse["error"] := "Campos obrigatórios: grupo, desc."
+        oRest:setStatusCode(400)
+        oRest:setResponse(jResponse:toJson())
+        Return .F.
+    EndIf
+
+    // Preparar dados para inclusão
+    aAdd(aDados, {"BM_GRUPO", jBody["grupo"], Nil})
+    aAdd(aDados, {"BM_DESC", jBody["desc"], Nil})
+    aAdd(aDados, {"BM_STATUS", jBody:GetJsonObject("status"), Nil})
+    aAdd(aDados, {"BM_PROORI", jBody:GetJsonObject("proori"), Nil})
+    aAdd(aDados, {"BM_MARGPRE", jBody:GetJsonObject("margpre"), Nil})
+    aAdd(aDados, {"BM_DTUMOV", jBody:GetJsonObject("dtumov"), Nil})
+
+    // Chamar rotina de inclusão
+    MsExecAuto({|x, y| MATA035(x, y)}, aDados, 3)
+
+    jResponse["message"] := "Grupo de Produtos criado com sucesso."
+    oRest:setStatusCode(201)
+    oRest:setResponse(jResponse:toJson())
+Return .T.
